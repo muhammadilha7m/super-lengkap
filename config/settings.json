@@ -1,0 +1,66 @@
+{
+  "app": {
+    "name": "Spectrum AI",
+    "version": "0.1.0",
+    "theme": "dark-glass",
+    "language": "id"
+  },
+  "ai": {
+    "provider": "groq",
+    "model": "llama-3.3-70b-versatile",
+    "models_available": [
+      "llama-3.3-70b-versatile",
+      "deepseek-r1-distill-llama-70b",
+      "mixtral-8x7b-32768"
+    ],
+    "api_key": "",
+    "api_key_env": "GROQ_API_KEY",
+    "temperature": 0.8,
+    "max_tokens": 1024
+  },
+  "render": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "codec": "libx264",
+    "crf": 18,
+    "preset": "medium",
+    "audio_bitrate": "192k",
+    "gpu": "auto",
+    "gpu_encoders": {
+      "nvidia": "h264_nvenc",
+      "amd": "h264_amf",
+      "intel": "h264_qsv"
+    }
+  },
+  "performance": {
+    "mode": "balanced",
+    "modes": ["low", "balanced", "ultra"]
+  },
+  "paths": {
+    "projects": "projects",
+    "exports": "exports",
+    "cache": "cache",
+    "logs": "logs",
+    "assets": "assets"
+  },
+  "audio": {
+    "sample_rate": 44100,
+    "fft_size": 2048,
+    "hop_length": 512,
+    "n_mels": 128,
+    "spectrum_bands": 64
+  },
+  "ui": {
+    "frameless": true,
+    "preview_fps": 30,
+    "preview_scale": 0.5,
+    "shortcuts": {
+      "play": "Space",
+      "render": "Ctrl+R",
+      "save": "Ctrl+S",
+      "open": "Ctrl+O",
+      "auto_generate": "Ctrl+G"
+    }
+  }
+}

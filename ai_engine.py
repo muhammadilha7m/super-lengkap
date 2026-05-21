@@ -1,0 +1,162 @@
+"""Thin wrapper around the Groq chat-completion API.
+
+When no API key is configured the engine still works in *mock* mode so the rest
+of the application keeps functioning during development / offline use.
+"""
+from __future__ import annotations
+
+import json
+import os
+import random
+import textwrap
+from dataclasses import dataclass
+from typing import Any
+
+from app.core.config import Config
+from app.core.logger import get_logger
+
+log = get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Result container
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AIResult:
+    text: str
+    model: str
+    used_mock: bool = False
+
+    @property
+    def ok(self) -> bool:
+        return bool(self.text)
+
+
+# ---------------------------------------------------------------------------
+# Engine
+# ---------------------------------------------------------------------------
+
+
+class AIEngine:
+    """High level facade around Groq's chat completion API."""
+
+    def __init__(self, config: Config | None = None) -> None:
+        self.config = config or Config.load()
+        self.api_key = self.config.get("ai.api_key", "") or os.environ.get(
+            self.config.get("ai.api_key_env", "GROQ_API_KEY"), ""
+        )
+        self.model = self.config.get("ai.model", "llama-3.3-70b-versatile")
+        self.temperature = float(self.config.get("ai.temperature", 0.8))
+        self.max_tokens = int(self.config.get("ai.max_tokens", 1024))
+        self._client: Any | None = None
+
+    # ----- availability -------------------------------------------------
+    @property
+    def available(self) -> bool:
+        return bool(self.api_key)
+
+    def _get_client(self) -> Any | None:
+        if not self.available:
+            return None
+        if self._client is not None:
+            return self._client
+        try:
+            from groq import Groq  # type: ignore
+        except Exception as exc:  # pragma: no cover - import guard
+            log.warning("Groq SDK not installed: %s", exc)
+            return None
+        try:
+            self._client = Groq(api_key=self.api_key)
+        except Exception as exc:
+            log.error("Groq client init failed: %s", exc)
+            return None
+        return self._client
+
+    # ----- core call ----------------------------------------------------
+    def chat(self, system: str, user: str, *, model: str | None = None) -> AIResult:
+        target_model = model or self.model
+        client = self._get_client()
+        if client is None:
+            log.info("AI: running in MOCK mode (no API key / SDK)")
+            return AIResult(text=self._mock_response(system, user), model=target_model, used_mock=True)
+        try:
+            response = client.chat.completions.create(
+                model=target_model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+            text = (response.choices[0].message.content or "").strip()
+            return AIResult(text=text, model=target_model, used_mock=False)
+        except Exception as exc:
+            log.error("Groq API call failed: %s", exc)
+            return AIResult(text=self._mock_response(system, user), model=target_model, used_mock=True)
+
+    def chat_json(self, system: str, user: str, *, model: str | None = None) -> dict[str, Any]:
+        """Run ``chat`` and try to parse the result as JSON.
+
+        Falls back to ``{"text": <raw>}`` on parse failure.
+        """
+        result = self.chat(system, user, model=model)
+        text = result.text.strip()
+        # Strip code fences if any
+        if text.startswith("```"):
+            text = text.strip("`")
+            if "\n" in text:
+                text = text.split("\n", 1)[1]
+            if text.endswith("```"):
+                text = text[:-3]
+        try:
+            return json.loads(text)
+        except Exception:
+            return {"text": result.text}
+
+    # ----- mock fallback ------------------------------------------------
+    def _mock_response(self, system: str, user: str) -> str:
+        """Deterministic-ish lorem-ish response so the app stays usable offline."""
+        seed = abs(hash(system + user)) % (2**32)
+        random.seed(seed)
+        if "json" in system.lower() or "json" in user.lower():
+            return json.dumps(
+                {
+                    "title": random.choice([
+                        "Neon Heartbeat", "Midnight Echo", "Spectrum Soul",
+                        "Velocity", "Aurora Drive",
+                    ]),
+                    "hashtags": [
+                        "#musicvideo", "#lyricvideo", "#spectrum", "#aimusic", "#visualizer",
+                    ],
+                    "description": "Generated by Spectrum AI (mock mode).",
+                },
+                ensure_ascii=False,
+            )
+        sample = textwrap.dedent(
+            """\
+            [Verse]
+            Lampu kota memantul di mataku
+            Setiap detak mengejar waktu
+            Aku terbang di antara neon biru
+            Dunia berputar dalam satu lagu
+
+            [Chorus]
+            Bawa aku, ke langit yang tak pernah tidur
+            Bawa aku, di mana mimpi tidak kabur
+            Spectrum jiwa menyala terang
+            Kita berdua menari di tepi gelap
+            """
+        ).strip()
+        return sample
+
+
+# ---------------------------------------------------------------------------
+# Standalone helpers
+# ---------------------------------------------------------------------------
+
+
+def make_engine(config: Config | None = None) -> AIEngine:
+    return AIEngine(config=config)
