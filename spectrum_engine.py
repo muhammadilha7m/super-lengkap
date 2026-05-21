@@ -262,6 +262,9 @@ class SpectrumEngine:
         baseline = int(h * 0.85)
         max_height = int(h * 0.65)
 
+        # Draw all bars first onto the frame; collect rects for the glow pass
+        # so we only blur once at the end (much faster than per-bar blur).
+        rects: list[tuple[int, int, int, int, tuple[int, int, int]]] = []
         for i, v in enumerate(bands):
             x = offset_x + (i + 1) * (bar_w + gap) - bar_w
             bar_h = int(max_height * float(v))
@@ -269,13 +272,28 @@ class SpectrumEngine:
             top = baseline - bar_h
             cv2.rectangle(frame, (x, top), (x + bar_w, baseline), color, -1)
             if mirror:
-                cv2.rectangle(frame, (x, baseline + 4), (x + bar_w, baseline + 4 + bar_h), color, -1)
-            if self.style.glow:
-                # cheap glow by alpha-blending a blurred copy
-                glow = np.zeros_like(frame)
-                cv2.rectangle(glow, (x - 2, top - 2), (x + bar_w + 2, baseline + 2), color, -1)
-                glow = cv2.GaussianBlur(glow, (0, 0), sigmaX=8 * glow_boost, sigmaY=8 * glow_boost)
-                frame = cv2.addWeighted(frame, 1.0, glow, 0.6, 0)
+                cv2.rectangle(
+                    frame,
+                    (x, baseline + 4),
+                    (x + bar_w, baseline + 4 + bar_h),
+                    color,
+                    -1,
+                )
+            rects.append((x, top, bar_w, bar_h, color))
+
+        if self.style.glow and rects:
+            glow = np.zeros_like(frame)
+            for x, top, bw, bh, color in rects:
+                cv2.rectangle(
+                    glow,
+                    (x - 2, top - 2),
+                    (x + bw + 2, baseline + 2),
+                    color,
+                    -1,
+                )
+            sigma = max(2.0, 8.0 * glow_boost)
+            glow = cv2.GaussianBlur(glow, (0, 0), sigmaX=sigma, sigmaY=sigma)
+            frame = cv2.addWeighted(frame, 1.0, glow, 0.6, 0)
         return frame
 
     def _draw_wave(self, frame: np.ndarray, bands: np.ndarray) -> np.ndarray:

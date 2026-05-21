@@ -9,7 +9,10 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QLabel, QSizePolicy
 
+from app.core.logger import get_logger
 from renderer import RenderJob, render_preview_frame
+
+log = get_logger(__name__)
 
 
 class PreviewWidget(QLabel):
@@ -91,16 +94,28 @@ class PreviewWidget(QLabel):
                 self.fps_callback(fps)
 
     def _render_once(self, t: float) -> None:
-        assert self._job is not None
-        frame = render_preview_frame(self._job, t)
-        self._set_frame(frame)
+        if self._job is None:
+            return
+        try:
+            frame = render_preview_frame(self._job, t)
+            self._set_frame(frame)
+        except Exception:
+            # Never let a render exception kill the GUI thread.
+            log.exception("Preview render failed at t=%.3f", t)
+            self._timer.stop()
+            self.setText(
+                "Preview gagal di-render. Cek logs/app.log untuk detail."
+            )
 
     def _set_frame(self, frame: np.ndarray) -> None:
-        # BGR -> RGB
+        # BGR -> RGB and ensure contiguous buffer.
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        if not rgb.flags["C_CONTIGUOUS"]:
+            rgb = np.ascontiguousarray(rgb)
         h, w, _ = rgb.shape
         bytes_per_line = 3 * w
-        image = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        # QImage stores only a pointer; copy() so the numpy buffer can free safely.
+        image = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()
         pix = QPixmap.fromImage(image)
         pix = pix.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.setPixmap(pix)

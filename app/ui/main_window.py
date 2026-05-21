@@ -74,7 +74,10 @@ class MainWindow(QMainWindow):
         self.current_project = Project()
         self._analysis: MusicAnalysis | None = None
         self._lyrics: LyricsBundle | None = None
-        self._workers: list[QThread] = []
+        # Keep python refs to BOTH worker objects and their QThreads.
+        # Without a python ref to the worker, the PySide binding can be
+        # garbage-collected while the C++ side is still running → segfault.
+        self._workers: list[tuple[object, QThread]] = []
 
         self._init_ui()
         self._init_shortcuts()
@@ -519,7 +522,7 @@ class MainWindow(QMainWindow):
             particle_count=60 if self.chk_particles.isChecked() else 0,
         )
 
-    def _build_job(self) -> RenderJob | None:
+    def _build_job(self, *, for_preview: bool = False) -> RenderJob | None:
         if self._analysis is None:
             return None
         settings = RenderSettings(
@@ -533,6 +536,21 @@ class MainWindow(QMainWindow):
             settings.width, settings.height = 1080, 1920
         else:
             settings.width, settings.height = resolution_pair(self.cmb_res.currentText())
+        if for_preview:
+            # Live preview renders at a reduced internal resolution for smooth
+            # 30 fps playback while keeping aspect ratio. The exporter still
+            # uses the full resolution.
+            target_long_edge = 720
+            if settings.width >= settings.height:
+                scale = target_long_edge / max(1, settings.width)
+            else:
+                scale = target_long_edge / max(1, settings.height)
+            scale = min(1.0, scale)
+            settings.width = max(2, int(settings.width * scale))
+            settings.height = max(2, int(settings.height * scale))
+            # Round to even (encoder-friendly + crisper rectangles).
+            settings.width -= settings.width % 2
+            settings.height -= settings.height % 2
         return RenderJob(
             analysis=self._analysis,
             lyrics=self._lyrics or LyricsBundle(),
@@ -552,41 +570,76 @@ class MainWindow(QMainWindow):
         self._set_status(f"Analisa: {Path(path).name}")
         self._run_analyze(path)
 
+    def _start_worker(self, worker, on_finished) -> None:
+        """Launch ``worker`` in its own QThread, keeping python refs alive.
+
+        Connections use :class:`Qt.QueuedConnection` to guarantee that signals
+        crossing thread boundaries are delivered safely to the GUI thread.
+        """
+        thread = QThread()
+        worker.moveToThread(thread)
+        thread.started.connect(worker.safe_run)
+        worker.finished.connect(on_finished, Qt.QueuedConnection)
+        worker.failed.connect(self._on_worker_failed, Qt.QueuedConnection)
+        worker.progress.connect(self._on_worker_progress, Qt.QueuedConnection)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+
+        entry: tuple[object, QThread] = (worker, thread)
+
+        def _cleanup() -> None:
+            try:
+                self._workers.remove(entry)
+            except ValueError:
+                pass
+            worker.deleteLater()
+            thread.deleteLater()
+
+        thread.finished.connect(_cleanup)
+        self._workers.append(entry)
+        thread.start()
+
     def _run_analyze(self, path: str) -> None:
         worker = AnalyzeWorker(path)
-        thread = worker.start_in_thread()
-        worker.finished.connect(self._on_analysis_done)
-        worker.failed.connect(self._on_worker_failed)
-        worker.progress.connect(self._on_worker_progress)
-        worker.finished.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        self._workers.append(thread)
-        thread.start()
+        self._start_worker(worker, self._on_analysis_done)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # busy
 
     def _on_analysis_done(self, analysis: MusicAnalysis) -> None:
-        self._analysis = analysis
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(100)
-        self.progress_bar.setVisible(False)
-        self.lbl_audio_info.setText(
-            f"Audio: {Path(analysis.path).name} \u00b7 {analysis.duration:.1f}s \u00b7 "
-            f"BPM {analysis.bpm:.0f} \u00b7 {analysis.mood}"
-        )
-        self._set_status("Analisis selesai. Tekan Play untuk preview, atau Generate lirik.")
-        self.timeline.setMaximum(max(1, int(analysis.duration * 10)))
-        # auto-pick palette
-        if analysis.mood == "energetic":
-            self.cmb_palette.setCurrentText("Neon Night")
-        elif analysis.mood == "dreamy":
-            self.cmb_palette.setCurrentText("Pastel Dream")
-        elif analysis.mood == "dark":
-            self.cmb_palette.setCurrentText("Cinematic Noir")
-        # Refresh preview
-        job = self._build_job()
-        self.preview.set_job(job)
+        try:
+            self._analysis = analysis
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(100)
+            self.progress_bar.setVisible(False)
+            self.lbl_audio_info.setText(
+                f"Audio: {Path(analysis.path).name} \u00b7 {analysis.duration:.1f}s \u00b7 "
+                f"BPM {analysis.bpm:.0f} \u00b7 {analysis.mood}"
+            )
+            self._set_status(
+                "Analisis selesai. Tekan Play untuk preview, atau Generate lirik."
+            )
+            self.timeline.setMaximum(max(1, int(analysis.duration * 10)))
+            # auto-pick palette (block signals so we don't fire two preview rebuilds)
+            if analysis.mood == "energetic":
+                target = "Neon Night"
+            elif analysis.mood == "dreamy":
+                target = "Pastel Dream"
+            elif analysis.mood == "dark":
+                target = "Cinematic Noir"
+            else:
+                target = self.cmb_palette.currentText()
+            self.cmb_palette.blockSignals(True)
+            self.cmb_palette.setCurrentText(target)
+            self.cmb_palette.blockSignals(False)
+            # Refresh preview (single build at reduced preview resolution).
+            job = self._build_job(for_preview=True)
+            self.preview.set_job(job)
+        except Exception as exc:  # pragma: no cover - defensive UI guard
+            log.exception("Failed to apply analysis result")
+            QMessageBox.critical(
+                self, "Error", f"Gagal memproses hasil analisis: {exc}"
+            )
+            self.progress_bar.setVisible(False)
 
     def _on_new_project(self) -> None:
         self.current_project = Project()
@@ -651,15 +704,7 @@ class MainWindow(QMainWindow):
         style = self.txt_style.text().strip() or None
         self._set_status("Generate lirik dengan AI…")
         worker = LyricsWorker(self._analysis, theme=theme, style=style)
-        thread = worker.start_in_thread()
-        worker.finished.connect(self._on_lyrics_done)
-        worker.failed.connect(self._on_worker_failed)
-        worker.progress.connect(self._on_worker_progress)
-        worker.finished.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        self._workers.append(thread)
-        thread.start()
+        self._start_worker(worker, self._on_lyrics_done)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
 
@@ -670,7 +715,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(100)
         self.progress_bar.setVisible(False)
         self._set_status(f"Lirik siap: {bundle.title}")
-        job = self._build_job()
+        job = self._build_job(for_preview=True)
         self.preview.set_job(job)
 
     def _on_rewrite_lyrics(self) -> None:
@@ -678,16 +723,10 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Info", "Generate lirik dulu sebelum rewrite.")
             return
         self._sync_lyrics_from_editor()
-        worker = RewriteLyricsWorker(self._lyrics, instruction="Buat lebih natural dan emosional")
-        thread = worker.start_in_thread()
-        worker.finished.connect(self._on_lyrics_done)
-        worker.failed.connect(self._on_worker_failed)
-        worker.progress.connect(self._on_worker_progress)
-        worker.finished.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        self._workers.append(thread)
-        thread.start()
+        worker = RewriteLyricsWorker(
+            self._lyrics, instruction="Buat lebih natural dan emosional"
+        )
+        self._start_worker(worker, self._on_lyrics_done)
 
     def _sync_lyrics_from_editor(self) -> None:
         if self._lyrics is None:
@@ -739,15 +778,7 @@ class MainWindow(QMainWindow):
             gpu=self.cmb_gpu.currentText(),
         )
         worker = ExportWorker(job, settings)
-        thread = worker.start_in_thread()
-        worker.finished.connect(self._on_export_done)
-        worker.failed.connect(self._on_worker_failed)
-        worker.progress.connect(self._on_worker_progress)
-        worker.finished.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        self._workers.append(thread)
-        thread.start()
+        self._start_worker(worker, self._on_export_done)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self._set_status("Rendering video…")
@@ -838,7 +869,7 @@ class MainWindow(QMainWindow):
     def _update_spectrum_style(self, *args) -> None:
         if self._analysis is None:
             return
-        job = self._build_job()
+        job = self._build_job(for_preview=True)
         self.preview.set_job(job)
 
     def _ai_status_text(self) -> str:

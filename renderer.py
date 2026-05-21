@@ -122,9 +122,41 @@ def iter_frames(
 # ---------------------------------------------------------------------------
 
 
-def render_preview_frame(job: RenderJob, t: float) -> np.ndarray:
-    """Render a single frame — used by the live preview widget."""
-    engine = SpectrumEngine(job.spectrum_style, job.settings.width, job.settings.height)
+_PREVIEW_ENGINE_CACHE: dict[int, tuple[int, int, "SpectrumEngine"]] = {}
+
+
+def render_preview_frame(
+    job: RenderJob,
+    t: float,
+    *,
+    engine: "SpectrumEngine | None" = None,
+) -> np.ndarray:
+    """Render a single frame — used by the live preview widget.
+
+    A SpectrumEngine instance is cached **per RenderJob identity** so smoothing
+    state and background-gradient cache stay live across frames. This avoids
+    allocating multi-megabyte buffers 30 times per second.
+    """
+    if engine is None:
+        cached = _PREVIEW_ENGINE_CACHE.get(id(job))
+        if (
+            cached is None
+            or cached[0] != job.settings.width
+            or cached[1] != job.settings.height
+        ):
+            engine = SpectrumEngine(
+                job.spectrum_style, job.settings.width, job.settings.height
+            )
+            _PREVIEW_ENGINE_CACHE[id(job)] = (
+                job.settings.width,
+                job.settings.height,
+                engine,
+            )
+        else:
+            engine = cached[2]
+            # Keep style updated in-place (mode/palette/etc. may change).
+            engine.style = job.spectrum_style
+
     frame = engine.render(t, job.analysis)
     if job.settings.show_subtitles and job.lyrics.lines:
         frame = render_subtitle_layer(
@@ -142,6 +174,10 @@ def render_preview_frame(job: RenderJob, t: float) -> np.ndarray:
         new_h = int(job.settings.height * job.settings.preview_scale)
         frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
     return frame
+
+
+def clear_preview_cache() -> None:
+    _PREVIEW_ENGINE_CACHE.clear()
 
 
 def render_thumbnail(job: RenderJob, *, at_ratio: float = 0.25) -> np.ndarray:
