@@ -1,0 +1,47 @@
+{
+  "name": "Default Cinematic",
+  "description": "Template default \u2014 spectrum bar + karaoke lyric + cinematic gradient.",
+  "resolution": [1920, 1080],
+  "fps": 30,
+  "background": {
+    "type": "gradient",
+    "colors": ["#0a0a1a", "#1a0a2e", "#0a1a2e"],
+    "animation": "slow_pan"
+  },
+  "spectrum": {
+    "mode": "bar",
+    "bands": 64,
+    "sensitivity": 1.0,
+    "smoothing": 0.8,
+    "position": "bottom",
+    "color_palette": ["#00e5ff", "#7c4dff", "#ff4081"],
+    "glow": true,
+    "motion_blur": 0.15
+  },
+  "particles": {
+    "enabled": true,
+    "type": "neon",
+    "count": 60,
+    "reactive": "bass"
+  },
+  "lyrics": {
+    "font": "Inter",
+    "size": 64,
+    "color": "#ffffff",
+    "highlight": "#00e5ff",
+    "position": "center",
+    "animation": "fade",
+    "outline": true,
+    "glow": true
+  },
+  "effects": {
+    "film_grain": 0.05,
+    "vignette": 0.3,
+    "rgb_split": 0.0,
+    "beat_flash": 0.1
+  },
+  "camera": {
+    "zoom": 1.02,
+    "beat_shake": 0.04
+  }
+}
