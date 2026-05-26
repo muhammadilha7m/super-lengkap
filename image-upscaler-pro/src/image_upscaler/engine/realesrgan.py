@@ -15,6 +15,7 @@ will then offer to fall back to Lanczos.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import shutil
@@ -26,7 +27,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
-from ..constants import ENGINE_REALESRGAN, SCALE_PRESETS
+from ..constants import ENGINE_REALESRGAN, REALESRGAN_MODEL_SCALES, SCALE_PRESETS
 from ..utils.image import save_image
 from .base import EngineError, UpscaleEngine, UpscaleOptions
 
@@ -98,6 +99,15 @@ class RealEsrganEngine(UpscaleEngine):
                 f"Real-ESRGAN ncnn-vulkan hanya mendukung scale {SCALE_PRESETS}, "
                 f"diminta x{options.scale}. Gunakan Lanczos untuk skala bebas."
             )
+        if options.model:
+            allowed = REALESRGAN_MODEL_SCALES.get(options.model)
+            if allowed is not None and options.scale not in allowed:
+                allowed_str = "/".join(f"{s}x" for s in allowed)
+                raise EngineError(
+                    f"Model '{options.model}' hanya mendukung {allowed_str}. "
+                    f"Pilih skala yang sesuai, atau ganti model ke 'realesr-animevideov3' "
+                    f"yang mendukung 2x/3x/4x."
+                )
 
         with tempfile.TemporaryDirectory(prefix="iup_") as tmp_dir:
             tmp_in = Path(tmp_dir) / "in.png"
@@ -127,18 +137,38 @@ class RealEsrganEngine(UpscaleEngine):
             except (OSError, FileNotFoundError) as exc:
                 raise EngineError(f"Gagal menjalankan Real-ESRGAN: {exc}") from exc
 
-            while proc.poll() is None:
-                if cancel_event.wait(0.2):
-                    self._terminate(proc)
-                    raise EngineError("cancelled")
+            # Drain stdout/stderr in background threads. ncnn-vulkan streams
+            # progress lines ("0.00%\n1.00%\n...") which would otherwise fill
+            # the OS pipe buffer (~64 KB) and block the subprocess forever.
+            stdout_buf: list[str] = []
+            stderr_buf: list[str] = []
+            t_out = self._spawn_reader(proc.stdout, stdout_buf)
+            t_err = self._spawn_reader(proc.stderr, stderr_buf)
 
-            stderr = (proc.stderr.read() if proc.stderr else "") or ""
+            try:
+                while proc.poll() is None:
+                    if cancel_event.wait(0.2):
+                        self._terminate(proc)
+                        raise EngineError("cancelled")
+            finally:
+                # Ensure pipes are fully drained even on early exit.
+                if t_out is not None:
+                    t_out.join(timeout=2)
+                if t_err is not None:
+                    t_err.join(timeout=2)
+
+            stderr = "".join(stderr_buf).strip()
+            stdout = "".join(stdout_buf).strip()
             if proc.returncode != 0:
+                detail = stderr or stdout or "(no output)"
                 raise EngineError(
-                    f"Real-ESRGAN exit code {proc.returncode}: {stderr.strip() or '(no stderr)'}"
+                    f"Real-ESRGAN exit code {proc.returncode}: {detail}"
                 )
             if not tmp_out.exists():
-                raise EngineError("Real-ESRGAN selesai tapi tidak ada output yang dibuat.")
+                detail = stderr or stdout or "(no output)"
+                raise EngineError(
+                    f"Real-ESRGAN selesai tapi output tidak terbuat. {detail}"
+                )
 
             with Image.open(tmp_out) as result:
                 result.load()
@@ -169,3 +199,25 @@ class RealEsrganEngine(UpscaleEngine):
                 proc.kill()
         except OSError:
             pass
+
+    @staticmethod
+    def _spawn_reader(stream, sink: list[str]) -> threading.Thread | None:
+        """Drain a Popen text stream into ``sink`` from a daemon thread."""
+        if stream is None:
+            return None
+
+        def _pump() -> None:
+            try:
+                for chunk in iter(stream.readline, ""):
+                    if not chunk:
+                        break
+                    sink.append(chunk)
+            except (OSError, ValueError):
+                pass
+            finally:
+                with contextlib.suppress(OSError):
+                    stream.close()
+
+        t = threading.Thread(target=_pump, name="iup-pipe-pump", daemon=True)
+        t.start()
+        return t

@@ -14,6 +14,7 @@ from ..constants import (
     ENGINE_CHOICES,
     ENGINE_REALESRGAN,
     OUTPUT_FORMATS,
+    REALESRGAN_MODEL_SCALES,
     REALESRGAN_MODELS,
     SCALE_PRESETS,
 )
@@ -98,7 +99,7 @@ class Sidebar(ctk.CTkScrollableFrame):
             self,
             values=list(REALESRGAN_MODELS),
             variable=self.model_var,
-            command=lambda _v: self._emit(),
+            command=self._on_model_change,
             fg_color=palette.card,
             button_color=palette.secondary,
             button_hover_color=palette.primary_hover,
@@ -109,7 +110,15 @@ class Sidebar(ctk.CTkScrollableFrame):
             height=36,
             font=theme.FONT_LABEL,
         )
-        self.model_menu.grid(row=row, column=0, sticky="ew", padx=20, pady=(0, 8))
+        self.model_menu.grid(row=row, column=0, sticky="ew", padx=20, pady=(0, 4))
+        row += 1
+
+        self._model_hint = Hint(
+            self,
+            text=self._model_hint_text(config.realesrgan_model),
+            palette=palette,
+        )
+        self._model_hint.grid(row=row, column=0, sticky="ew", padx=20, pady=(0, 10))
         row += 1
 
         self.realesrgan_path_var = ctk.StringVar(value=config.realesrgan_binary)
@@ -136,6 +145,7 @@ class Sidebar(ctk.CTkScrollableFrame):
         scale_row.grid(row=row, column=0, sticky="ew", padx=20, pady=(0, 14))
         for i in range(len(SCALE_PRESETS)):
             scale_row.grid_columnconfigure(i, weight=1)
+        self._scale_buttons: list[ctk.CTkRadioButton] = []
         for i, val in enumerate(SCALE_PRESETS):
             btn = ctk.CTkRadioButton(
                 scale_row,
@@ -149,7 +159,10 @@ class Sidebar(ctk.CTkScrollableFrame):
                 font=theme.FONT_LABEL_BOLD,
             )
             btn.grid(row=0, column=i, sticky="w", padx=(0, 8))
+            self._scale_buttons.append(btn)
         row += 1
+        # Apply initial enable/disable based on engine + model.
+        self._apply_scale_constraints()
 
         SectionTitle(self, text="Format Output", palette=palette).grid(
             row=row, column=0, sticky="ew", padx=20, pady=(0, 6)
@@ -407,7 +420,40 @@ class Sidebar(ctk.CTkScrollableFrame):
         self.jpeg_quality_label.configure(text=f"Kualitas JPEG/WEBP: {int(value)}")
         self._emit()
 
+    def _on_model_change(self, _value: str) -> None:
+        self._model_hint.configure(text=self._model_hint_text(self.model_var.get()))
+        self._apply_scale_constraints()
+        self._emit()
+
+    @staticmethod
+    def _model_hint_text(model: str) -> str:
+        allowed = REALESRGAN_MODEL_SCALES.get(model)
+        if not allowed:
+            return ""
+        allowed_str = "/".join(f"{s}x" for s in allowed)
+        if len(allowed) == 1:
+            return f"Model '{model}' hanya mendukung {allowed_str}."
+        return f"Model '{model}' mendukung {allowed_str}."
+
+    def _apply_scale_constraints(self) -> None:
+        """Disable scale radio buttons that the current engine/model can't do."""
+        if not hasattr(self, "_scale_buttons"):
+            return
+        engine = self.engine_var.get() if hasattr(self, "engine_var") else ""
+        allowed: tuple[int, ...] | None = None
+        if engine == ENGINE_REALESRGAN:
+            allowed = REALESRGAN_MODEL_SCALES.get(self.model_var.get())
+        for btn, val in zip(self._scale_buttons, SCALE_PRESETS, strict=True):
+            if allowed is None or val in allowed:
+                btn.configure(state="normal")
+            else:
+                btn.configure(state="disabled")
+        # If current selection is no longer allowed, switch to the first valid one.
+        if allowed is not None and self.scale_var.get() not in allowed:
+            self.scale_var.set(allowed[0])
+
     def _emit(self) -> None:
+        self._apply_scale_constraints()
         self._on_change()
 
     def collect_into(self, config: AppConfig) -> None:

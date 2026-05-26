@@ -41,6 +41,15 @@ REALESRGAN_MODELS = (
 )
 DEFAULT_REALESRGAN_MODEL = "realesrgan-x4plus"
 
+# Which scale factors each ncnn-vulkan model supports. Picking an unsupported
+# scale (e.g. realesrgan-x4plus at 3x) makes the binary fail to find its
+# weights, so we validate upfront and surface a clear error instead.
+REALESRGAN_MODEL_SCALES: dict[str, tuple[int, ...]] = {
+    "realesrgan-x4plus": (4,),
+    "realesrgan-x4plus-anime": (4,),
+    "realesr-animevideov3": (2, 3, 4),
+}
+
 SUFFIX_TEMPLATE = "_upscaled_{scale}x"
 
 CONFLICT_MODES = ("skip", "overwrite", "rename")
