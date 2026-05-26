@@ -35,6 +35,7 @@ from .ui.dnd import get_dnd_root_class, register_drop_target
 from .ui.preview import PreviewPanel
 from .ui.queue_panel import QueuePanel
 from .ui.sidebar import Sidebar
+from .ui.splash import Splash
 from .ui.statusbar import StatusBar
 from .utils.notifications import play_done_sound, show_desktop_notification
 from .utils.paths import expand_paths
@@ -59,7 +60,7 @@ def _make_root() -> ctk.CTk:
 class App:
     """Top-level application controller."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, show_splash: bool = True) -> None:
         self.config = AppConfig.load()
 
         ctk.set_appearance_mode(self.config.appearance_mode)
@@ -77,6 +78,16 @@ class App:
         self.worker: BatchWorker | None = None
         self.event_queue: queue.Queue[WorkerEvent] = queue.Queue()
         self._poll_after_id: str | None = None
+        self._splash: Splash | None = None
+
+        if show_splash:
+            try:
+                self.root.withdraw()
+                self._splash = Splash(self.root, on_close=self._reveal_main_window)
+            except Exception as exc:  # pragma: no cover - depends on env
+                log.warning("Splash failed (%s); showing main window directly.", exc)
+                self._splash = None
+                self.root.deiconify()
 
         self._build_layout()
         self._register_dnd()
@@ -88,6 +99,19 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._poll_events()
+
+        if self._splash is not None:
+            self.root.after(150, self._splash.close)
+
+    def _reveal_main_window(self) -> None:
+        """Called by the splash when its fade-out completes."""
+        try:
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
+        except tk.TclError:
+            pass
+        self._splash = None
 
     # ------------------------------------------------------------------ Layout
 

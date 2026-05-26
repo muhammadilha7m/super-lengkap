@@ -26,7 +26,16 @@ Aplikasi Python untuk **upscale gambar** (single & batch) dengan tampilan modern
 
 ## 🚀 Quick Start (Windows)
 
-### 1. Install Python 3.9+ dan dependency
+### Cara cepat — double-click `setup.bat` lalu `run.bat`
+
+1. **Setup** sekali saja (buat venv + install dependencies):
+   - Double-click **`setup.bat`** di folder `image-upscaler-pro\`
+   - Script akan minta konfirmasi untuk download Real-ESRGAN AI binary (opsional, bisa di-skip)
+2. **Jalankan** kapan saja:
+   - Double-click **`run.bat`**
+   - Splash screen "Image Upscaler Pro By BASIS" muncul ~2 detik, lalu main window terbuka
+
+### Cara manual (PowerShell)
 
 ```powershell
 git clone https://github.com/muhammadilha7m/super-lengkap.git
@@ -35,17 +44,12 @@ cd super-lengkap\image-upscaler-pro
 py -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
-```
-
-### 2. Jalankan aplikasi
-
-```powershell
 python run.py
 ```
 
 Aplikasi langsung jalan dengan engine **Lanczos** (instant, tidak perlu setup tambahan).
 
-### 3. (Opsional) Aktifkan Real-ESRGAN untuk hasil AI yang lebih tajam
+### (Opsional) Aktifkan Real-ESRGAN untuk hasil AI yang lebih tajam
 
 ```powershell
 python scripts\download_realesrgan.py
@@ -110,6 +114,8 @@ python -m image_upscaler
 ```
 image-upscaler-pro/
 ├── run.py                       # Entry point
+├── setup.bat                    # Windows: buat venv + install deps
+├── run.bat                      # Windows: launcher (pakai pythonw, tanpa console)
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── pyproject.toml
@@ -130,6 +136,7 @@ image-upscaler-pro/
 │   │   ├── queue_panel.py       # Queue list + toolbar
 │   │   ├── preview.py           # Before/after compare slider
 │   │   ├── statusbar.py         # Bottom status bar
+│   │   ├── splash.py            # Animated intro splash (BASIS branding)
 │   │   ├── widgets.py           # Reusable widgets
 │   │   └── dnd.py               # tkinterdnd2 wrapper
 │   └── utils/
