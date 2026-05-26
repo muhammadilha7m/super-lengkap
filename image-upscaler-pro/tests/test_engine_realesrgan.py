@@ -14,7 +14,7 @@ import pytest
 from PIL import Image
 
 from image_upscaler.engine.base import EngineError, UpscaleOptions
-from image_upscaler.engine.realesrgan import RealEsrganEngine
+from image_upscaler.engine.realesrgan import RealEsrganEngine, _popen_silent_kwargs
 
 
 def _make_image(path: Path, size: tuple[int, int] = (16, 16)) -> None:
@@ -107,6 +107,30 @@ def test_pipe_draining_does_not_hang(
         threading.Event(),
     )
     assert (tmp_path / "out.png").exists()
+
+
+def test_popen_silent_kwargs_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """On Windows, Popen must receive CREATE_NO_WINDOW + hidden STARTUPINFO so
+    no CMD console flashes when each job spawns the binary."""
+    import subprocess as sp
+
+    monkeypatch.setattr("sys.platform", "win32")
+    # subprocess.STARTUPINFO only exists on Windows; stub it for the test.
+    monkeypatch.setattr(
+        sp,
+        "STARTUPINFO",
+        getattr(sp, "STARTUPINFO", lambda: type("SU", (), {"dwFlags": 0, "wShowWindow": 0})()),
+        raising=False,
+    )
+    monkeypatch.setattr(sp, "STARTF_USESHOWWINDOW", 0x00000001, raising=False)
+    kwargs = _popen_silent_kwargs()
+    assert kwargs["creationflags"] == 0x08000000  # CREATE_NO_WINDOW
+    assert "startupinfo" in kwargs
+
+
+def test_popen_silent_kwargs_posix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("sys.platform", "linux")
+    assert _popen_silent_kwargs() == {}
 
 
 def test_nonzero_exit_surfaces_stderr(

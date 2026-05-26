@@ -33,6 +33,29 @@ from .base import EngineError, UpscaleEngine, UpscaleOptions
 
 log = logging.getLogger(__name__)
 
+# ``CREATE_NO_WINDOW`` value, copied so we don't depend on ``subprocess``
+# attribute presence (it only exists on Windows builds of CPython).
+_CREATE_NO_WINDOW_FLAG = 0x08000000
+
+
+def _popen_silent_kwargs() -> dict:
+    """Extra Popen kwargs needed to avoid CMD console flashes on Windows.
+
+    On Windows, spawning a console subprocess (.exe) makes a black CMD window
+    pop up briefly for every job. We pass ``creationflags=CREATE_NO_WINDOW``
+    together with a hidden ``STARTUPINFO`` so the console is suppressed even
+    if the binary tries to attach to one. On POSIX both are no-ops.
+    """
+    if not sys.platform.startswith("win"):
+        return {}
+    startupinfo = subprocess.STARTUPINFO()  # type: ignore[attr-defined]
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore[attr-defined]
+    startupinfo.wShowWindow = 0  # SW_HIDE
+    return {
+        "creationflags": _CREATE_NO_WINDOW_FLAG,
+        "startupinfo": startupinfo,
+    }
+
 
 def _candidate_binary_names() -> list[str]:
     if sys.platform.startswith("win"):
@@ -133,6 +156,7 @@ class RealEsrganEngine(UpscaleEngine):
                     stderr=subprocess.PIPE,
                     cwd=self._binary.parent,
                     text=True,
+                    **_popen_silent_kwargs(),
                 )
             except (OSError, FileNotFoundError) as exc:
                 raise EngineError(f"Gagal menjalankan Real-ESRGAN: {exc}") from exc
