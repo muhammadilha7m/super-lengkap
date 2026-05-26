@@ -21,8 +21,12 @@ from . import theme
 from .widgets import Hint, SectionTitle
 
 
-class Sidebar(ctk.CTkFrame):
-    """Vertical settings panel on the left side of the window."""
+class Sidebar(ctk.CTkScrollableFrame):
+    """Vertical settings panel on the left side of the window.
+
+    Uses a scrollable frame so the panel stays usable on shorter screens
+    or when the OS taskbar would otherwise clip the bottom controls.
+    """
 
     def __init__(
         self,
@@ -36,12 +40,19 @@ class Sidebar(ctk.CTkFrame):
         on_appearance_change: Callable[[str], None],
         on_accent_change: Callable[[str], None],
     ) -> None:
-        super().__init__(master, fg_color=palette.bg_alt, corner_radius=0, width=320)
+        super().__init__(
+            master,
+            fg_color=palette.bg_alt,
+            corner_radius=0,
+            width=320,
+            scrollbar_fg_color=palette.bg_alt,
+            scrollbar_button_color=palette.border,
+            scrollbar_button_hover_color=palette.primary_hover,
+        )
         self._config = config
         self._palette = palette
         self._on_change = on_change
 
-        self.grid_propagate(False)
         self.grid_columnconfigure(0, weight=1)
 
         row = 0
@@ -296,7 +307,7 @@ class Sidebar(ctk.CTkFrame):
         self.appearance_var = ctk.StringVar(value=config.appearance_mode)
         self.appearance_menu = ctk.CTkSegmentedButton(
             appearance_row,
-            values=["dark", "light", "system"],
+            values=["dark", "light", "white", "system"],
             variable=self.appearance_var,
             command=on_appearance_change,
             fg_color=palette.card,

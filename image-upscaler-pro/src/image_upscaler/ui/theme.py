@@ -54,8 +54,7 @@ class Palette:
 def palette_for(appearance: str, accent: str) -> Palette:
     accent_key = accent if accent in ACCENTS else "blue"
     a = ACCENTS[accent_key]
-    is_dark = appearance == "dark"
-    if is_dark:
+    if appearance == "dark":
         bg = "#0F1117"
         bg_alt = "#13151D"
         card = "#1A1D27"
@@ -63,7 +62,17 @@ def palette_for(appearance: str, accent: str) -> Palette:
         border = "#2A2F3F"
         text = "#E5E7EB"
         text_muted = "#9CA3AF"
+    elif appearance == "white":
+        # Pure white, minimalist palette.
+        bg = "#FFFFFF"
+        bg_alt = "#FAFAFB"
+        card = "#FFFFFF"
+        card_alt = "#F5F5F7"
+        border = "#E4E4E7"
+        text = "#111827"
+        text_muted = "#6B7280"
     else:
+        # "light" (and "system" - resolved by ctk to either dark or light)
         bg = "#F1F5F9"
         bg_alt = "#E2E8F0"
         card = "#FFFFFF"

@@ -57,19 +57,29 @@ def _make_root() -> ctk.CTk:
     return ctk.CTk()
 
 
+def _ctk_mode(mode: str) -> str:
+    """Map our extended appearance modes to a value accepted by CustomTkinter.
+
+    CustomTkinter only knows ``"Dark"`` / ``"Light"`` / ``"System"``; our
+    extra ``"white"`` option is a Light variant with a pure-white palette.
+    """
+    if mode == "white":
+        return "Light"
+    return mode
+
+
 class App:
     """Top-level application controller."""
 
     def __init__(self, *, show_splash: bool = True) -> None:
         self.config = AppConfig.load()
 
-        ctk.set_appearance_mode(self.config.appearance_mode)
+        ctk.set_appearance_mode(_ctk_mode(self.config.appearance_mode))
         ctk.set_default_color_theme("blue")
 
         self.root = _make_root()
         self.root.title(APP_NAME)
-        self.root.geometry(f"{UI_DEFAULT_WIDTH}x{UI_DEFAULT_HEIGHT}")
-        self.root.minsize(UI_MIN_WIDTH, UI_MIN_HEIGHT)
+        self._apply_initial_geometry()
 
         self.palette = theme.palette_for(self.config.appearance_mode, self.config.accent_color)
         self.root.configure(fg_color=self.palette.bg)
@@ -112,6 +122,23 @@ class App:
         except tk.TclError:
             pass
         self._splash = None
+
+    def _apply_initial_geometry(self) -> None:
+        """Pick a window size that fits the current screen and center it.
+
+        On Windows the taskbar is typically 40-48px tall; we leave a small
+        margin so the window never spills under it.
+        """
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        margin_x, margin_y = 40, 80
+        w = min(UI_DEFAULT_WIDTH, max(UI_MIN_WIDTH, screen_w - margin_x))
+        h = min(UI_DEFAULT_HEIGHT, max(UI_MIN_HEIGHT, screen_h - margin_y))
+        x = max(0, (screen_w - w) // 2)
+        y = max(0, (screen_h - h) // 2 - 20)
+        self.root.geometry(f"{w}x{h}+{x}+{y}")
+        # min_w / min_h still enforced so layout never breaks.
+        self.root.minsize(min(UI_MIN_WIDTH, w), min(UI_MIN_HEIGHT, h))
 
     # ------------------------------------------------------------------ Layout
 
@@ -371,7 +398,7 @@ class App:
 
     def _on_appearance_change(self, mode: str) -> None:
         self.config.appearance_mode = mode
-        ctk.set_appearance_mode(mode)
+        ctk.set_appearance_mode(_ctk_mode(mode))
         self._rebuild_palette()
 
     def _on_accent_change(self, accent: str) -> None:

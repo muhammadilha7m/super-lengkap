@@ -58,7 +58,7 @@ class AppConfig:
     webp_quality: int = DEFAULT_WEBP_QUALITY
     output_dir: str = ""  # empty = next to source file
     conflict_mode: str = DEFAULT_CONFLICT_MODE
-    appearance_mode: str = "dark"  # "dark" | "light" | "system"
+    appearance_mode: str = "dark"  # "dark" | "light" | "white" | "system"
     accent_color: str = "blue"  # "blue" | "purple" | "green"
     preserve_exif: bool = True
     play_sound_on_done: bool = True
